@@ -1,0 +1,371 @@
+import { useState, useEffect, useMemo } from "react";
+import { Plus, Trash2, ChefHat, TrendingUp, TrendingDown, Loader2 } from "lucide-react";
+
+const INK = "#2A241E";
+const PAPER = "#FAF6EE";
+const TOMATO = "#B23A2E";
+const BASIL = "#46693B";
+const MUSTARD = "#C89B3C";
+const LINE = "#DCD0BC";
+
+const KATEGORILER = [
+  "Malzeme / Hammadde",
+  "Ambalaj",
+  "Kira / Fatura",
+  "Ulaşım / Kargo",
+  "Ekipman",
+  "Reklam / Pazarlama",
+  "Diğer",
+];
+
+const STORAGE_KEY = "ev-mutfagi-defteri:kayitlar";
+
+function todayISO() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
+function tl(n) {
+  return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+
+function monthKey(dateStr) {
+  return dateStr.slice(0, 7);
+}
+
+function monthLabel(key) {
+  const [y, m] = key.split("-");
+  const aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+  return `${aylar[parseInt(m, 10) - 1]} ${y}`;
+}
+
+export default function EvMutfagiDefteri() {
+  const [kayitlar, setKayitlar] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState(false);
+
+  const [tip, setTip] = useState("gelir");
+  const [tarih, setTarih] = useState(todayISO());
+  const [aciklama, setAciklama] = useState("");
+  const [kategori, setKategori] = useState(KATEGORILER[0]);
+  const [tutar, setTutar] = useState("");
+
+  const [secilenAy, setSecilenAy] = useState(monthKey(todayISO()));
+  const [gorunum, setGorunum] = useState("ay"); // "ay" | "tum"
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY, false);
+        setKayitlar(res && res.value ? JSON.parse(res.value) : []);
+      } catch {
+        setKayitlar([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function kaydet(yeniListe) {
+    setKayitlar(yeniListe);
+    try {
+      const result = await window.storage.set(STORAGE_KEY, JSON.stringify(yeniListe), false);
+      setSaveError(!result);
+    } catch {
+      setSaveError(true);
+    }
+  }
+
+  function ekle() {
+    const sayi = parseFloat(String(tutar).replace(",", "."));
+    if (!tarih || !aciklama.trim() || !sayi || sayi <= 0) return;
+    const kayit = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      tip,
+      tarih,
+      aciklama: aciklama.trim(),
+      kategori: tip === "gider" ? kategori : null,
+      tutar: sayi,
+    };
+    const yeni = [...kayitlar, kayit].sort((a, b) => a.tarih.localeCompare(b.tarih));
+    kaydet(yeni);
+    setAciklama("");
+    setTutar("");
+  }
+
+  function sil(id) {
+    kaydet(kayitlar.filter((k) => k.id !== id));
+  }
+
+  const ayAnahtarlari = useMemo(() => {
+    const s = new Set(kayitlar.map((k) => monthKey(k.tarih)));
+    s.add(monthKey(todayISO()));
+    return Array.from(s).sort().reverse();
+  }, [kayitlar]);
+
+  const gosterilenKayitlar = useMemo(() => {
+    const filtered = gorunum === "ay" ? kayitlar.filter((k) => monthKey(k.tarih) === secilenAy) : kayitlar;
+    return [...filtered].sort((a, b) => b.tarih.localeCompare(a.tarih));
+  }, [kayitlar, gorunum, secilenAy]);
+
+  const toplamlar = useMemo(() => {
+    const gelir = gosterilenKayitlar.filter((k) => k.tip === "gelir").reduce((a, k) => a + k.tutar, 0);
+    const gider = gosterilenKayitlar.filter((k) => k.tip === "gider").reduce((a, k) => a + k.tutar, 0);
+    return { gelir, gider, net: gelir - gider };
+  }, [gosterilenKayitlar]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: PAPER }}>
+        <Loader2 className="animate-spin" size={28} style={{ color: INK }} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full" style={{ background: PAPER, color: INK, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="max-w-md mx-auto px-4 py-6">
+        {/* Başlık */}
+        <div className="flex items-center gap-2 mb-5">
+          <div className="rounded-full p-2" style={{ background: INK }}>
+            <ChefHat size={20} color={PAPER} />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold leading-tight">Ev Mutfağı Defteri</h1>
+            <p className="text-xs opacity-70">Gelir · Gider · Kâr takibi</p>
+          </div>
+        </div>
+
+        {/* FİŞ / RECEIPT ÖZET KARTI */}
+        <div
+          className="relative mb-6"
+          style={{
+            background: "#FFFFFF",
+            border: `1px solid ${LINE}`,
+            borderRadius: "2px",
+            boxShadow: "0 2px 10px rgba(42,36,30,0.08)",
+          }}
+        >
+          {/* üst kesik çizgi (fiş perforasyonu) */}
+          <div
+            style={{
+              height: "10px",
+              backgroundImage: `radial-gradient(circle at 6px 0px, ${PAPER} 5px, transparent 5.5px)`,
+              backgroundSize: "12px 10px",
+              backgroundRepeat: "repeat-x",
+              marginTop: "-1px",
+            }}
+          />
+          <div className="px-5 pt-2 pb-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex rounded-full overflow-hidden" style={{ border: `1px solid ${LINE}` }}>
+                <button
+                  onClick={() => setGorunum("ay")}
+                  className="text-xs px-3 py-1 font-medium"
+                  style={{
+                    background: gorunum === "ay" ? INK : "transparent",
+                    color: gorunum === "ay" ? PAPER : INK,
+                  }}
+                >
+                  Bu Ay
+                </button>
+                <button
+                  onClick={() => setGorunum("tum")}
+                  className="text-xs px-3 py-1 font-medium"
+                  style={{
+                    background: gorunum === "tum" ? INK : "transparent",
+                    color: gorunum === "tum" ? PAPER : INK,
+                  }}
+                >
+                  Tüm Zamanlar
+                </button>
+              </div>
+              {gorunum === "ay" && (
+                <select
+                  value={secilenAy}
+                  onChange={(e) => setSecilenAy(e.target.value)}
+                  className="text-xs bg-transparent font-medium"
+                  style={{ color: INK, border: "none", outline: "none" }}
+                >
+                  {ayAnahtarlari.map((ay) => (
+                    <option key={ay} value={ay}>
+                      {monthLabel(ay)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="flex justify-between items-baseline py-1" style={{ borderBottom: `1px dashed ${LINE}` }}>
+              <span className="text-xs uppercase tracking-wide opacity-70 flex items-center gap-1">
+                <TrendingUp size={13} style={{ color: BASIL }} /> Gelir
+              </span>
+              <span className="font-mono text-sm font-semibold" style={{ color: BASIL }}>
+                {tl(toplamlar.gelir)} ₺
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline py-1" style={{ borderBottom: `1px dashed ${LINE}` }}>
+              <span className="text-xs uppercase tracking-wide opacity-70 flex items-center gap-1">
+                <TrendingDown size={13} style={{ color: TOMATO }} /> Gider
+              </span>
+              <span className="font-mono text-sm font-semibold" style={{ color: TOMATO }}>
+                {tl(toplamlar.gider)} ₺
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline pt-2 mt-1">
+              <span className="text-xs uppercase tracking-wide font-bold">Net Kâr</span>
+              <span
+                className="font-mono text-xl font-bold"
+                style={{ color: toplamlar.net >= 0 ? BASIL : TOMATO }}
+              >
+                {toplamlar.net >= 0 ? "+" : ""}
+                {tl(toplamlar.net)} ₺
+              </span>
+            </div>
+          </div>
+          {/* alt kesik çizgi */}
+          <div
+            style={{
+              height: "10px",
+              backgroundImage: `radial-gradient(circle at 6px 10px, ${PAPER} 5px, transparent 5.5px)`,
+              backgroundSize: "12px 10px",
+              backgroundRepeat: "repeat-x",
+              marginBottom: "-1px",
+            }}
+          />
+        </div>
+
+        {/* EKLEME FORMU */}
+        <div className="mb-6 p-4" style={{ background: "#FFFFFF", border: `1px solid ${LINE}`, borderRadius: "10px" }}>
+          <div className="flex mb-3 rounded-lg overflow-hidden" style={{ border: `1px solid ${LINE}` }}>
+            <button
+              onClick={() => setTip("gelir")}
+              className="flex-1 py-2 text-sm font-semibold flex items-center justify-center gap-1"
+              style={{ background: tip === "gelir" ? BASIL : "transparent", color: tip === "gelir" ? "#fff" : INK }}
+            >
+              <TrendingUp size={15} /> Gelir Ekle
+            </button>
+            <button
+              onClick={() => setTip("gider")}
+              className="flex-1 py-2 text-sm font-semibold flex items-center justify-center gap-1"
+              style={{ background: tip === "gider" ? TOMATO : "transparent", color: tip === "gider" ? "#fff" : INK }}
+            >
+              <TrendingDown size={15} /> Gider Ekle
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <input
+              type="date"
+              value={tarih}
+              onChange={(e) => setTarih(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg"
+              style={{ border: `1px solid ${LINE}`, outline: "none" }}
+            />
+            <input
+              type="text"
+              placeholder={tip === "gelir" ? "Ne sattın? (örn: 3 kg mantı - Ayşe Hanım)" : "Ne için harcadın? (örn: un, yağ)"}
+              value={aciklama}
+              onChange={(e) => setAciklama(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg"
+              style={{ border: `1px solid ${LINE}`, outline: "none" }}
+            />
+            {tip === "gider" && (
+              <select
+                value={kategori}
+                onChange={(e) => setKategori(e.target.value)}
+                className="w-full text-sm px-3 py-2 rounded-lg"
+                style={{ border: `1px solid ${LINE}`, outline: "none" }}
+              >
+                {KATEGORILER.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder="Tutar (₺)"
+                value={tutar}
+                onChange={(e) => setTutar(e.target.value)}
+                className="flex-1 text-sm px-3 py-2 rounded-lg font-mono"
+                style={{ border: `1px solid ${LINE}`, outline: "none" }}
+              />
+              <button
+                onClick={ekle}
+                className="px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-1 text-white"
+                style={{ background: tip === "gelir" ? BASIL : TOMATO }}
+              >
+                <Plus size={16} /> Ekle
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* KAYIT LİSTESİ */}
+        <div>
+          <h2 className="text-xs font-bold uppercase tracking-wide opacity-70 mb-2 px-1">
+            {gorunum === "ay" ? `${monthLabel(secilenAy)} Hareketleri` : "Tüm Hareketler"} ({gosterilenKayitlar.length})
+          </h2>
+
+          {gosterilenKayitlar.length === 0 ? (
+            <div className="text-center py-10 text-sm opacity-60">
+              Henüz kayıt yok. Yukarıdan ilk gelir veya gideri ekle.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {gosterilenKayitlar.map((k) => (
+                <div
+                  key={k.id}
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg group"
+                  style={{ background: "#FFFFFF", border: `1px solid ${LINE}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono opacity-60">
+                        {k.tarih.slice(8, 10)}.{k.tarih.slice(5, 7)}
+                      </span>
+                      {k.kategori && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded-full"
+                          style={{ background: "#F1E8D8", color: MUSTARD === MUSTARD ? "#8A6A1F" : INK }}
+                        >
+                          {k.kategori}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm truncate">{k.aciklama}</p>
+                  </div>
+                  <div className="flex items-center gap-2 pl-2">
+                    <span
+                      className="font-mono text-sm font-semibold whitespace-nowrap"
+                      style={{ color: k.tip === "gelir" ? BASIL : TOMATO }}
+                    >
+                      {k.tip === "gelir" ? "+" : "-"}
+                      {tl(k.tutar)} ₺
+                    </span>
+                    <button onClick={() => sil(k.id)} className="opacity-40 hover:opacity-100">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {saveError && (
+          <p className="text-xs mt-4 text-center" style={{ color: TOMATO }}>
+            Kayıt şu an tarayıcıya yazılamadı, bağlantını kontrol edip tekrar dener misin.
+          </p>
+        )}
+
+        <p className="text-[11px] text-center opacity-50 mt-6">Veriler bu cihazda, sana özel olarak saklanır.</p>
+      </div>
+    </div>
+  );
+}
